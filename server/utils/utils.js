@@ -41,7 +41,7 @@ export async function getEbayAccessToken() {
 //sold listing utils
 export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 	const browser = await puppeteer.launch({
-		headless: false, // false to see browser
+		headless: true, // false to see browser
 		args: [
 			'--no-sandbox',
 			'--disable-setuid-sandbox',
@@ -76,8 +76,8 @@ export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 	let aucResults = await scrape(page, urlAuction, maxPages);
 	let binResults = await scrape(page, urlBin, maxPages);
 
-	// await page.close(); // close the page
-	// await browser.close(); // close the browser
+	await page.close(); // close the page
+	await browser.close(); // close the browser
 
 	return { aucResults, binResults };
 }
