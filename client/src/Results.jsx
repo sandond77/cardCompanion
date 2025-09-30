@@ -1,5 +1,6 @@
 import { Typography, CircularProgress, Box } from '@mui/material';
 import ListingsModal from './ListingsModal';
+import LineChart from './Chart';
 
 export default function Results({
 	boxLabel1,
@@ -80,6 +81,7 @@ export default function Results({
 			</>
 			{/* Render a modal only if there are listings */}
 			{listingsArray.length > 0 && <ListingsModal listings={listingsArray} />}
+			{listingsArray.length > 0 && <LineChart listings={listingsArray} />}
 		</>
 	);
 }
