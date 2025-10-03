@@ -84,93 +84,114 @@ export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 
 async function scrape(page, url, maxPages) {
 	await page.goto(url, { waitUntil: 'networkidle2' });
-	await page.waitForSelector('.srp-results, .su-card-container', {
+	await page.waitForSelector('.s-item, .su-card-container', {
 		visible: true,
 		timeout: 15000
 	});
 
 	let results = [];
+
+	// helper lives in Node context
+	function cleanTitle(raw) {
+		if (!raw) return '';
+		return raw
+			.replace(/Opens in a new window or tab/gi, '')
+			.replace(/Shop on eBay/gi, '')
+			.trim();
+	}
+
 	try {
 		let currentPage = 1;
 		while (currentPage <= maxPages) {
-			const pageListings = await page.$$eval(
+			// collect raw data only inside browser
+			const rawListings = await page.$$eval(
 				'.s-item, .su-card-container',
 				(items) =>
-					items
-						.map((item) => {
-							const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
-							const get = (sel) =>
-								clean(item.querySelector(sel)?.textContent || '');
-							const getAttr = (sel, attr) =>
-								item.querySelector(sel)?.getAttribute(attr) || '';
+					items.map((item) => {
+						const get = (sel) =>
+							item.querySelector(sel)?.textContent?.trim() || '';
+						const getAttr = (sel, attr) =>
+							item.querySelector(sel)?.getAttribute(attr) || '';
 
-							// Title - uses cleantitle function to help remove any extra labels
-							const title = cleanTitle(
-								item.querySelector('.s-item__title span')?.textContent ||
-									item.querySelector('.s-card__title span')?.textContent ||
-									item.querySelector('[data-testid="item-title"]')
-										?.textContent ||
-									item.querySelector('.s-item__title')?.textContent ||
-									''
-							);
+						const rawTitle =
+							get('.s-item__title span') ||
+							get('.s-card__title span') ||
+							get('[data-testid="item-title"]') ||
+							get('.s-item__title') ||
+							getAttr('a.su-link', 'aria-label') ||
+							'';
 
-							// Price
-							const priceText =
-								get('.s-item__price') || get('.s-card__price') || '';
-							const price = { value: priceText, currency: 'USD' };
+						const priceText =
+							get('.s-item__price') || get('.s-card__price') || '';
 
-							// Sold Date
-							const soldDate =
-								get('.s-item__ended-date') ||
-								get('.s-item__title--tagblock span') ||
-								get('.su-styled-text.positive.default') ||
-								get('.s-card__caption .su-styled-text') ||
-								'';
+						const soldDate =
+							get('.s-item__ended-date') ||
+							get('.s-item__title--tagblock span') ||
+							get('.su-styled-text.positive.default') ||
+							get('.s-card__caption .su-styled-text') ||
+							'';
 
-							let date = '';
-							let match = soldDate.match(
-								/([A-Za-z]+ \d{1,2}, \d{4})|(\d{4}\/\d{1,2}\/\d{1,2})/
-							);
-							if (match) {
-								const d = new Date(match[0]);
-								if (!isNaN(+d)) {
-									date = d.toISOString().split('T')[0];
-								}
-							}
+						const link =
+							getAttr('.s-item__link', 'href') ||
+							getAttr('a.su-link[href*="/itm/"]', 'href') ||
+							'';
 
-							// Link & ID
-							let link =
-								getAttr('.s-item__link', 'href') ||
-								getAttr('a.su-link[href*="/itm/"]', 'href');
-							const matchID = link?.match(/\/itm\/(\d+)/);
-							const numericId = matchID ? matchID[1] : '';
-							const itemId = numericId ? `v1|${numericId}|0` : '';
-							link = numericId ? `https://www.ebay.com/itm/${numericId}` : '';
+						const seller =
+							get(
+								'.s-item__detail.s-item__detail--secondary .s-item__etrs-text span.PRIMARY'
+							) ||
+							get(
+								'.su-card-container__attributes__secondary .su-styled-text.primary.large'
+							) ||
+							'';
 
-							// Seller
-							let sellerUsername =
-								get(
-									'.s-item__detail.s-item__detail--secondary .s-item__etrs-text span.PRIMARY'
-								) ||
-								get(
-									'.su-card-container__attributes__secondary .su-styled-text.primary.large'
-								) ||
-								'';
-							const seller = { username: sellerUsername };
-
-							return { itemId, title, price, date, link, seller };
-						})
-						.filter(
-							(item) =>
-								item.title &&
-								!item.title.toLowerCase().includes('shop on ebay') &&
-								item.price &&
-								item.link
-						)
+						return { rawTitle, priceText, soldDate, link, seller };
+					})
 			);
+
+			// clean + normalize in Node
+			const pageListings = rawListings
+				.map((r) => {
+					const title = cleanTitle(r.rawTitle);
+
+					let date = '';
+					const match = r.soldDate.match(
+						/([A-Za-z]+ \d{1,2}, \d{4})|(\d{4}\/\d{1,2}\/\d{1,2})/
+					);
+					if (match) {
+						const d = new Date(match[0]);
+						if (!isNaN(+d)) {
+							date = d.toISOString().split('T')[0];
+						}
+					}
+
+					const matchID = r.link?.match(/\/itm\/(\d+)/);
+					const numericId = matchID ? matchID[1] : '';
+					const itemId = numericId ? `v1|${numericId}|0` : '';
+					const fixedLink = numericId
+						? `https://www.ebay.com/itm/${numericId}`
+						: '';
+
+					return {
+						itemId,
+						title,
+						price: { value: r.priceText, currency: 'USD' },
+						date,
+						link: fixedLink,
+						seller: { username: r.seller }
+					};
+				})
+				.filter(
+					(item) =>
+						item.title &&
+						!item.title.toLowerCase().includes('shop on ebay') &&
+						item.price &&
+						item.link
+				);
 
 			results = results.concat(pageListings);
 
+			// safe navigation
 			const nextLink = await page.$('a.pagination__next');
 			if (nextLink && currentPage < maxPages) {
 				await Promise.all([
@@ -190,12 +211,4 @@ async function scrape(page, url, maxPages) {
 	} finally {
 		return results;
 	}
-}
-
-function cleanTitle(raw) {
-	if (!raw) return '';
-	return raw
-		.replace(/Opens in a new window or tab/gi, '')
-		.replace(/Shop on eBay/gi, '')
-		.trim();
 }
