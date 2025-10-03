@@ -14,13 +14,13 @@ export default function Results({
 		const valid = [];
 
 		for (const item of arr) {
-			if (valid.length === n) break;
+			if (valid.length === n) break; // stop once we have n items
 
 			if (
 				item &&
 				typeof item.price !== 'undefined' &&
 				item.date &&
-				!Number.isNaN(Date.parse(item.date))
+				!Number.isNaN(Date.parse(item.date)) // must be a valid date
 			) {
 				const price =
 					typeof item.price === 'number' ? item.price : Number(item.price);
@@ -28,16 +28,13 @@ export default function Results({
 			}
 		}
 
-		if (valid.length === 0) return;
+		if (valid.length === 0) return; // no valid sales at all
 
 		const total = valid.reduce((sum, p) => sum + p, 0);
-		return { average: (total / valid.length).toFixed(2), count: valid.length };
+		return { average: (total / valid.length).toFixed(2), count: valid.length }; // average based on however many valid items we got
 	}
 
-	// ✅ Filter only sold listings (with a date)
-	const soldListings = listingsArray.filter((item) => item.date);
-
-	let recentSalesAverage = averageRecentNFromArray(soldListings);
+	let recentSalesAverage = averageRecentNFromArray(listingsArray);
 
 	return (
 		<>
@@ -67,27 +64,25 @@ export default function Results({
 						))}
 
 						<div>
-							{recentSalesAverage && recentSalesAverage.count > 0 ? (
-								<Typography variant="h5">
-									Last {recentSalesAverage.count} Sales: $
-									{recentSalesAverage.average}
-								</Typography>
-							) : (
-								<Typography variant="h5" color="warning">
-									No sales data
-								</Typography>
-							)}
+							{listingsArray.some((item) => item.date) &&
+								(recentSalesAverage && recentSalesAverage.count > 0 ? (
+									<Typography variant="h5">
+										Last {recentSalesAverage.count} Sales: $
+										{recentSalesAverage.average}
+									</Typography>
+								) : (
+									<Typography variant="h5" color="warning">
+										No sales data
+									</Typography>
+								))}
 						</div>
 					</>
 				)}
 			</>
-			{/* Only show modal if there are listings */}
+			{/* Render a modal only if there are listings */}
 			{listingsArray.length > 0 && <ListingsModal listings={listingsArray} />}
-			{/* ✅ Only pass sold listings to the chart */}
-			{soldListings.length > 0 && (
-				<Box sx={{ mt: 4, mb: 4, p: 2 }}>
-					<LineChart listings={soldListings} />
-				</Box>
+			{listingsArray.length > 0 && listingsArray.some((item) => item.date) && (
+				<LineChart listings={listingsArray} />
 			)}
 		</>
 	);

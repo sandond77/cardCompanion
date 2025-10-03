@@ -58,8 +58,6 @@ export default function SoldListingsChart({ listings = [] }) {
 		.filter(Boolean)
 		.sort((a, b) => a.x - b.x);
 
-	console.log('Sold chart points:', soldPoints);
-
 	const data = {
 		datasets: [
 			{
