@@ -104,11 +104,15 @@ async function scrape(page, url, maxPages) {
 							const getAttr = (sel, attr) =>
 								item.querySelector(sel)?.getAttribute(attr) || '';
 
-							// Title
-							const title =
-								get('.s-item__title') ||
-								get('.s-card__title') ||
-								get('[role="heading"] span');
+							// Title - uses cleantitle function to help remove any extra labels
+							const title = cleanTitle(
+								item.querySelector('.s-item__title span')?.textContent ||
+									item.querySelector('.s-card__title span')?.textContent ||
+									item.querySelector('[data-testid="item-title"]')
+										?.textContent ||
+									item.querySelector('.s-item__title')?.textContent ||
+									''
+							);
 
 							// Price
 							const priceText =
@@ -170,9 +174,12 @@ async function scrape(page, url, maxPages) {
 			const nextLink = await page.$('a.pagination__next');
 			if (nextLink && currentPage < maxPages) {
 				await Promise.all([
-					nextLink.click(),
-					page.waitForSelector('.s-item, .su-card-container', { visible: true })
+					page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
+					nextLink.click()
 				]);
+				await page.waitForSelector('.s-item, .su-card-container', {
+					timeout: 15000
+				});
 				currentPage++;
 			} else {
 				break;
@@ -183,4 +190,12 @@ async function scrape(page, url, maxPages) {
 	} finally {
 		return results;
 	}
+}
+
+function cleanTitle(raw) {
+	if (!raw) return '';
+	return raw
+		.replace(/Opens in a new window or tab/gi, '')
+		.replace(/Shop on eBay/gi, '')
+		.trim();
 }
