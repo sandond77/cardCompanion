@@ -84,7 +84,11 @@ export default function Results({
 			{/* Only show modal if there are listings */}
 			{listingsArray.length > 0 && <ListingsModal listings={listingsArray} />}
 			{/* ✅ Only pass sold listings to the chart */}
-			{soldListings.length > 0 && <LineChart listings={soldListings} />}
+			{soldListings.length > 0 && (
+				<Box sx={{ mt: 4, mb: 4, p: 2 }}>
+					<LineChart listings={soldListings} />
+				</Box>
+			)}
 		</>
 	);
 }
