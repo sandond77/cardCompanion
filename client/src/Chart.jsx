@@ -11,8 +11,8 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import 'chartjs-adapter-date-fns';
+import { parseISO } from 'date-fns';
 
-// Register Chart.js modules
 ChartJS.register(
 	CategoryScale,
 	LinearScale,
@@ -24,71 +24,65 @@ ChartJS.register(
 	TimeScale
 );
 
-// Helper to parse price strings safely
-function parsePrice(priceObj) {
-	if (!priceObj || !priceObj.value) return null;
-	const val = priceObj.value;
-	if (typeof val === 'string') {
-		const match = val.match(/-?\d[\d,]*(?:\.\d+)?/);
-		if (!match) return null;
-		return parseFloat(match[0].replace(/,/g, ''));
+// --- Price parser (scraped data only) ---
+function extractPrice(listing) {
+	if (
+		listing.price &&
+		typeof listing.price === 'object' &&
+		listing.price.value
+	) {
+		return parseFloat(String(listing.price.value).replace(/[^0-9.]/g, ''));
 	}
-	if (typeof val === 'number') return val;
+	if (typeof listing.price === 'number') {
+		return listing.price;
+	}
 	return null;
 }
 
-// ✅ React component
-export default function LineChart({ listings = [] }) {
-	const dataPoints = listings
-		.map((l) => ({
-			x: l.date, // e.g. "2025-09-27"
-			y: parsePrice(l.price) // e.g. 55.99
-		}))
-		.filter((p) => p.y !== null && p.x)
-		.sort((a, b) => new Date(a.x) - new Date(b.x));
+// --- Date parser (scraped data only) ---
+function extractDate(listing) {
+	if (listing.date) {
+		return parseISO(listing.date);
+	}
+	return null;
+}
 
-	// Chart.js dataset
+export default function SoldListingsChart({ listings = [] }) {
+	const soldPoints = listings
+		.filter((l) => l.date) // ensure only sold data
+		.map((l) => {
+			const date = extractDate(l);
+			const price = extractPrice(l);
+			return date && price ? { x: date, y: price } : null;
+		})
+		.filter(Boolean)
+		.sort((a, b) => a.x - b.x);
+
+	console.log('Sold chart points:', soldPoints);
+
 	const data = {
 		datasets: [
 			{
-				label: 'Price (USD)',
-				data: dataPoints,
+				label: 'Sold Listings',
+				type: 'line',
+				data: soldPoints,
 				borderColor: 'rgb(53, 162, 235)',
 				backgroundColor: 'rgba(53, 162, 235, 0.5)',
-				showLine: dataPoints.length > 1, // avoid flat line with single point
 				tension: 0.2
 			}
 		]
 	};
 
-	// Chart.js options (kept inside the component file)
 	const options = {
 		responsive: true,
 		plugins: {
 			legend: { position: 'top' },
-			title: { display: true, text: 'Listings Price Over Time' },
-			tooltip: {
-				callbacks: {
-					label: (ctx) =>
-						typeof ctx.parsed.y === 'number'
-							? `Price: $${ctx.parsed.y.toLocaleString()}`
-							: 'Price: —'
-				}
-			}
+			title: { display: true, text: 'Sold Listings Price Trend' }
 		},
 		scales: {
 			x: {
 				type: 'time',
-				time: {
-					unit: 'day',
-					displayFormats: { day: 'yyyy-MM-dd' } // ✅ correct format
-				},
-				ticks: {
-					source: 'data', // ✅ use your listing dates for tick marks
-					autoSkip: false, // skip if too many
-					maxRotation: 45, // tilt labels for readability
-					minRotation: 0
-				},
+				time: { unit: 'day', displayFormats: { day: 'MM-dd-yyyy' } },
 				title: { display: true, text: 'Date' }
 			},
 			y: {
