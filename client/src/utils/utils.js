@@ -1,24 +1,37 @@
 import axios from 'axios';
 import Fuse from 'fuse.js';
 
-export async function filterResults(unfilteredResults, formData) {
+export function fuzzyFilterListings(listings, formData) {
+	// Normalize and combine the search terms
 	const { cardName, setName, grade, cardNumber } = formData;
-
 	const searchString = [cardName, setName, grade, cardNumber]
 		.filter(Boolean)
+		.map((s) => s.toLowerCase().replace(/[^a-z0-9]/g, '')) // normalize
 		.join(' ');
 
-	const fuse = new Fuse(unfilteredResults, {
-		includeScore: true,
-		threshold: 0.35, // adjust fuzziness (lower = stricter)
-		keys: [
-			{ name: 'title', weight: 0.7 },
-			{ name: 'seller.username', weight: 0.2 },
-			{ name: 'itemId', weight: 0.1 }
-		]
-	});
+	const cleanedListings = listings.map((l) => ({
+		...l,
+		title: l.title?.toLowerCase().replace(/\s+/g, ' ').trim()
+	}));
 
+	// Fuse options — tuned for titles
+	const options = {
+		includeScore: true,
+		threshold: 0.32, // tighter tolerance for similar titles
+		ignoreLocation: true, // match anywhere in string
+		minMatchCharLength: 2,
+		distance: 100, // allows some separation in tokens
+		keys: [
+			{
+				name: 'title',
+				weight: 1.0 // only match against title
+			}
+		]
+	};
+
+	const fuse = new Fuse(cleanedListings, options);
 	const results = fuse.search(searchString);
+
 	return results.map((r) => r.item);
 }
 
@@ -137,29 +150,29 @@ export async function parseApiData(
 }
 
 async function parseResults(arr1, arr2, formData, id, stateListing) {
-	arr1.forEach((result) => {
-		let title = result.title.toLowerCase();
-		title = title.replace(/\s/g, ''); //Removes potential whitespace so query will return PSA10 or PSA 10
-		const grade = formData.grade.toLowerCase();
-		const cardName = formData.cardName.toLowerCase().replace(/\s/g, '');
-		const cardNumber = formData.cardNumber.toLowerCase();
-		const setName = formData.setName.toLowerCase().replace(/\s/g, '');
-		const additionalDetail = formData.setName.toLowerCase().replace(/\s/g, '');
-		// const setNameMatch = setName ? title.includes(setName) : true;
-		// const additionalDetailMatch = additionalDetail ? title.includes(additionalDetail) : true;
-		//&& (setNameMatch || additionalDetailMatch)
+	const { grade, cardName, cardNumber, setName } = formData;
 
-		// console.log(grade, cardName, cardNumber);
-		// console.log(
-		// 	title.includes(grade),
-		// 	title.includes(cardName),
-		// 	title.includes(cardNumber)
-		// );
+	// Normalize inputs
+	const normalizedGrade = grade?.toLowerCase().replace(/\s/g, '') || '';
+	const normalizedCardName = cardName?.toLowerCase().replace(/\s/g, '') || '';
+	const normalizedCardNumber = cardNumber?.toLowerCase() || '';
+	const normalizedSetName = setName?.toLowerCase().replace(/\s/g, '') || '';
 
+	// --- PSA-specific regex (exact-ish) ---
+	let psaFiltered = arr1;
+	if (normalizedGrade.startsWith('psa')) {
+		const psaNum = normalizedGrade.replace('psa', '');
+		const psaRegex = new RegExp(`psa\\s*${psaNum}\\b`, 'i'); // PSA7, PSA 7
+		psaFiltered = arr1.filter((r) => psaRegex.test(r.title));
+	}
+
+	// --- Loose matching for the rest of the fields ---
+	psaFiltered.forEach((result) => {
+		let title = result.title.toLowerCase().replace(/\s/g, '');
 		if (
-			title.includes(grade) &&
-			title.includes(cardName) &&
-			title.includes(cardNumber)
+			title.includes(normalizedCardName) &&
+			title.includes(normalizedCardNumber) &&
+			title.includes(normalizedSetName)
 		) {
 			arr2.push(result);
 		}
@@ -167,44 +180,119 @@ async function parseResults(arr1, arr2, formData, id, stateListing) {
 
 	console.log(id, arr2);
 
-	let priceArray = [];
-	let listingsArray = [];
+	// --- Build arrays for price & listings ---
+	const priceArray = [];
+	const listingsArray = [];
 
-	//add if check to look for empty array
 	arr2.forEach((result) => {
-		let { value, currency } = result.price || result.currentBidPrice;
+		let { value, currency } = result.price || result.currentBidPrice || {};
+		if (!value || currency !== 'USD') return;
 		value = value.replace(/[^0-9.]/g, '');
-		if (currency === 'USD') {
-			priceArray.push(parseFloat(value));
+		const num = parseFloat(value);
+		if (Number.isNaN(num)) return;
 
-			const listingDetail = {
-				id: result.itemId || '',
-				title: result.title || '',
-				url: result.itemWebUrl || result.link || '',
-				seller: result.seller?.username || '',
-				price: parseFloat(parseFloat(value).toFixed(2)),
-				date: result.date || ''
-			};
-
-			listingsArray.push(listingDetail);
-		}
+		priceArray.push(num);
+		listingsArray.push({
+			id: result.itemId || '',
+			title: result.title || '',
+			url: result.itemWebUrl || result.link || '',
+			seller: result.seller?.username || '',
+			price: parseFloat(num.toFixed(2)),
+			date: result.date || ''
+		});
 	});
 
-	// sorts most recent first if there is a date; mainly for sold listings
-	listingsArray.sort((a, b) => {
-		if (a.date && b.date) {
-			const dateA = new Date(a.date);
-			const dateB = new Date(b.date);
-			return dateB - dateA;
-		}
-	});
+	// --- Sort sold listings ---
+	listingsArray.sort((a, b) =>
+		a.date && b.date ? new Date(b.date) - new Date(a.date) : 0
+	);
 
 	stateListing(listingsArray);
 
+	const avg =
+		priceArray.length > 0
+			? priceArray.reduce((a, b) => a + b, 0) / priceArray.length
+			: 0;
+
 	return {
-		Average: calculateAverage(priceArray).toFixed(2),
-		Lowest: Math.min(...priceArray).toFixed(2),
-		Highest: Math.max(...priceArray).toFixed(2),
+		Average: avg.toFixed(2),
+		Lowest: priceArray.length > 0 ? Math.min(...priceArray).toFixed(2) : '0.00',
+		Highest:
+			priceArray.length > 0 ? Math.max(...priceArray).toFixed(2) : '0.00',
 		'Data Points': priceArray.length
 	};
 }
+
+//original code before fuse
+// async function parseResults(arr1, arr2, formData, id, stateListing) {
+// 	arr1.forEach((result) => {
+// 		let title = result.title.toLowerCase();
+// 		title = title.replace(/\s/g, ''); //Removes potential whitespace so query will return PSA10 or PSA 10
+// 		const grade = formData.grade.toLowerCase();
+// 		const cardName = formData.cardName.toLowerCase().replace(/\s/g, '');
+// 		const cardNumber = formData.cardNumber.toLowerCase();
+// 		const setName = formData.setName.toLowerCase().replace(/\s/g, '');
+// 		const additionalDetail = formData.setName.toLowerCase().replace(/\s/g, '');
+// 		// const setNameMatch = setName ? title.includes(setName) : true;
+// 		// const additionalDetailMatch = additionalDetail ? title.includes(additionalDetail) : true;
+// 		//&& (setNameMatch || additionalDetailMatch)
+
+// 		// console.log(grade, cardName, cardNumber);
+// 		// console.log(
+// 		// 	title.includes(grade),
+// 		// 	title.includes(cardName),
+// 		// 	title.includes(cardNumber)
+// 		// );
+
+// 		if (
+// 			title.includes(grade) &&
+// 			title.includes(cardName) &&
+// 			title.includes(cardNumber)
+// 		) {
+// 			arr2.push(result);
+// 		}
+// 	});
+
+// 	console.log(id, arr2);
+
+// 	let priceArray = [];
+// 	let listingsArray = [];
+
+// 	//add if check to look for empty array
+// 	arr2.forEach((result) => {
+// 		let { value, currency } = result.price || result.currentBidPrice;
+// 		value = value.replace(/[^0-9.]/g, '');
+// 		if (currency === 'USD') {
+// 			priceArray.push(parseFloat(value));
+
+// 			const listingDetail = {
+// 				id: result.itemId || '',
+// 				title: result.title || '',
+// 				url: result.itemWebUrl || result.link || '',
+// 				seller: result.seller?.username || '',
+// 				price: parseFloat(parseFloat(value).toFixed(2)),
+// 				date: result.date || ''
+// 			};
+
+// 			listingsArray.push(listingDetail);
+// 		}
+// 	});
+
+// 	// sorts most recent first if there is a date; mainly for sold listings
+// 	listingsArray.sort((a, b) => {
+// 		if (a.date && b.date) {
+// 			const dateA = new Date(a.date);
+// 			const dateB = new Date(b.date);
+// 			return dateB - dateA;
+// 		}
+// 	});
+
+// 	stateListing(listingsArray);
+
+// 	return {
+// 		Average: calculateAverage(priceArray).toFixed(2),
+// 		Lowest: Math.min(...priceArray).toFixed(2),
+// 		Highest: Math.max(...priceArray).toFixed(2),
+// 		'Data Points': priceArray.length
+// 	};
+// }
