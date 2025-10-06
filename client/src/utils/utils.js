@@ -1,4 +1,26 @@
 import axios from 'axios';
+import Fuse from 'fuse.js';
+
+export async function filterResults(unfilteredResults, formData) {
+	const { cardName, setName, grade, cardNumber } = formData;
+
+	const searchString = [cardName, setName, grade, cardNumber]
+		.filter(Boolean)
+		.join(' ');
+
+	const fuse = new Fuse(unfilteredResults, {
+		includeScore: true,
+		threshold: 0.35, // adjust fuzziness (lower = stricter)
+		keys: [
+			{ name: 'title', weight: 0.7 },
+			{ name: 'seller.username', weight: 0.2 },
+			{ name: 'itemId', weight: 0.1 }
+		]
+	});
+
+	const results = fuse.search(searchString);
+	return results.map((r) => r.item);
+}
 
 export async function queryEbay(params) {
 	try {
