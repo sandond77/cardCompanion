@@ -91,13 +91,24 @@ export default function LineChart({ listings = [] }) {
 				}
 			},
 			y: {
-				min: minY - yPadding,
-				max: maxY + yPadding,
-				title: { display: true, text: 'Price (USD)', font: { size: 12 } },
+				min: 0, // ✅ always start from 0
+				max: maxY + yPadding, // ✅ dynamically scale up
+				title: {
+					display: true,
+					text: 'Price (USD)',
+					font: { size: 13, weight: 'bold' }
+				},
 				ticks: {
-					callback: (val) => `$${val}`,
+					callback: (val) => {
+						const rounded = Math.round((val + Number.EPSILON) * 100) / 100;
+						return `$${rounded.toLocaleString(undefined, {
+							minimumFractionDigits: 0,
+							maximumFractionDigits: 2
+						})}`;
+					},
 					font: { size: 11 }
-				}
+				},
+				beginAtZero: true // ✅ ensures Chart.js starts at 0 visually even if dataset doesn’t
 			}
 		}
 	};
