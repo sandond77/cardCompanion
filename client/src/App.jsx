@@ -7,7 +7,8 @@ import {
 	createTheme,
 	responsiveFontSizes,
 	Grid,
-	Link
+	Link,
+	ThemeProvider
 } from '@mui/material';
 import SearchForm from './SearchForm';
 import Results from './Results';
@@ -117,7 +118,7 @@ function App() {
 	}, [statistics, hasResults]);
 
 	return (
-		<>
+		<ThemeProvider theme={theme}>
 			<Container>
 				<Typography variant="h1" gutterBottom align="center" theme={theme}>
 					CardCompanion
@@ -190,7 +191,7 @@ function App() {
 				)}
 				{/* <Link href="#">Link</Link> */}
 			</Container>
-		</>
+		</ThemeProvider>
 	);
 }
 
