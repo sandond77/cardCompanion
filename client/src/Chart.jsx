@@ -24,73 +24,97 @@ ChartJS.register(
 	TimeScale
 );
 
-// --- Price parser (scraped data only) ---
-function extractPrice(listing) {
-	if (
-		listing.price &&
-		typeof listing.price === 'object' &&
-		listing.price.value
-	) {
-		return parseFloat(String(listing.price.value).replace(/[^0-9.]/g, ''));
-	}
-	if (typeof listing.price === 'number') {
-		return listing.price;
-	}
-	return null;
-}
-
-// --- Date parser (scraped data only) ---
-function extractDate(listing) {
-	if (listing.date) {
-		return parseISO(listing.date);
-	}
-	return null;
-}
-
-export default function SoldListingsChart({ listings = [] }) {
-	const soldPoints = listings
-		.filter((l) => l.date) // ensure only sold data
+export default function LineChart({ listings = [] }) {
+	const dataPoints = listings
 		.map((l) => {
-			const date = extractDate(l);
-			const price = extractPrice(l);
-			return date && price ? { x: date, y: price } : null;
+			const parsedDate = l.date ? parseISO(l.date) : null;
+			const price = typeof l.price === 'number' ? l.price : parseFloat(l.price);
+			return parsedDate && !isNaN(price) ? { x: parsedDate, y: price } : null;
 		})
 		.filter(Boolean)
 		.sort((a, b) => a.x - b.x);
 
+	const prices = dataPoints.map((p) => p.y);
+	const minY = Math.min(...prices);
+	const maxY = Math.max(...prices);
+	const yPadding = (maxY - minY) * 0.2; // ✅ 20% vertical padding for breathing room
+
 	const data = {
 		datasets: [
 			{
-				label: 'Sold Listings',
-				type: 'line',
-				data: soldPoints,
+				label: 'Sold Price (USD)',
+				data: dataPoints,
 				borderColor: 'rgb(53, 162, 235)',
-				backgroundColor: 'rgba(53, 162, 235, 0.5)',
-				tension: 0.2
+				backgroundColor: 'rgba(53, 162, 235, 0.4)',
+				tension: 0.3,
+				pointRadius: 4,
+				pointHoverRadius: 6,
+				fill: true
 			}
 		]
 	};
 
 	const options = {
 		responsive: true,
+		maintainAspectRatio: false,
 		plugins: {
-			legend: { position: 'top' },
-			title: { display: true, text: 'Sold Listings Price Trend' }
+			legend: { position: 'top', labels: { boxWidth: 12, font: { size: 12 } } },
+			title: {
+				display: true,
+				text: 'Sold Listings Trend',
+				font: {
+					size: 16,
+					weight: 'bold'
+				},
+				padding: { top: 10, bottom: 20 }
+			},
+			tooltip: {
+				mode: 'nearest',
+				intersect: false,
+				callbacks: {
+					label: (ctx) => `$${ctx.parsed.y.toLocaleString()}`
+				}
+			}
+		},
+		layout: {
+			padding: { left: 20, right: 20, top: 10, bottom: 10 }
 		},
 		scales: {
 			x: {
 				type: 'time',
-				time: { unit: 'day', displayFormats: { day: 'MM-dd-yyyy' } },
-				title: { display: true, text: 'Date' }
+				time: { unit: 'day', tooltipFormat: 'MM/dd/yyyy' },
+				title: { display: true, text: 'Date', font: { size: 12 } },
+				ticks: {
+					autoSkip: true,
+					maxTicksLimit: 6,
+					font: { size: 11 }
+				}
 			},
 			y: {
-				title: { display: true, text: 'Price (USD)' },
+				min: minY - yPadding,
+				max: maxY + yPadding,
+				title: { display: true, text: 'Price (USD)', font: { size: 12 } },
 				ticks: {
-					callback: (value) => `$${Number(value).toLocaleString()}`
+					callback: (val) => `$${val}`,
+					font: { size: 11 }
 				}
 			}
 		}
 	};
 
-	return <Line options={options} data={data} />;
+	return (
+		<div
+			style={{
+				width: '100%',
+				maxWidth: '100%',
+				height: 'clamp(300px, 50vw, 550px)',
+				margin: '0 auto',
+				padding: '8px',
+				overflow: 'hidden', // ✅ prevents chart bleed
+				boxSizing: 'border-box'
+			}}
+		>
+			<Line options={options} data={data} />
+		</div>
+	);
 }
