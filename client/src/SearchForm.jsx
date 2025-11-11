@@ -21,7 +21,7 @@ export default function SearchForm({
 
 	const handleReset = (event) => {
 		event.preventDefault();
-		console.log('reset hit');
+		// console.log('reset hit');
 		setFormData({
 			grade: '',
 			cardName: '',

@@ -52,7 +52,7 @@ function App() {
 	}
 
 	const handleSubmit = async (formData) => {
-		console.log('form submitted');
+		// console.log('form submitted');
 		resetStates();
 		const formValues = Object.values(formData); //converts formData object into an array of values
 		const parsedFormData = formValues.filter(Boolean).join(' '); //removes any blank spaces from array and joins elements with a space
@@ -74,7 +74,7 @@ function App() {
 		} finally {
 			setLoading(false);
 		}
-		console.log(statistics);
+		// console.log(statistics);
 	};
 
 	//need useeffect to listen to statistic/result state changes and refresh dom
