@@ -39,9 +39,13 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 export async function queryEbay(params) {
 	try {
 		const ebaySearch = await axios.get(`${API_BASE_URL}/api/search?${params}`);
-		const ebayScrape = await axios.get(`${API_BASE_URL}/api/scrape?${params}`);
 
-		return { ebaySearch, ebayScrape };
+		return { ebaySearch };
+
+		// const ebaySearch = await axios.get(`${API_BASE_URL}/api/search?${params}`);
+		// const ebayScrape = await axios.get(`${API_BASE_URL}/api/scrape?${params}`);
+
+		// return { ebaySearch, ebayScrape };
 	} catch (error) {
 		console.error('Error querying eBay API:', error);
 		throw error;
