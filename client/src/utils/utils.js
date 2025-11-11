@@ -35,19 +35,16 @@ export function fuzzyFilterListings(listings, formData) {
 	return results.map((r) => r.item);
 }
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 export async function queryEbay(params) {
 	try {
-		const ebaySearch = await axios.get(
-			`http://localhost:3001/api/search?${params}`
-		);
+		const ebaySearch = await axios.get(`${API_BASE_URL}/api/search?${params}`);
+		const ebayScrape = await axios.get(`${API_BASE_URL}/api/scrape?${params}`);
 
-		const ebayScrape = await axios.get(
-			`http://localhost:3001/api/scrape?${params}`
-		);
-		// return ebayScrape;
 		return { ebaySearch, ebayScrape };
 	} catch (error) {
-		console.error(error);
+		console.error('Error querying eBay API:', error);
+		throw error;
 	}
 }
 
