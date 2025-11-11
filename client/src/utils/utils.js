@@ -93,9 +93,9 @@ export async function parseApiData(
 		unfilteredResults?.ebayScrape?.data?.binSold ?? [];
 	const filteredSoldAucResults =
 		unfilteredResults?.ebayScrape?.data?.aucSold ?? [];
-	console.log('look here ----- ');
-	console.log(unfilteredResults.ebaySearch);
-	console.log(unfilteredResults.ebayScrape);
+	// console.log('look here ----- ');
+	// console.log(unfilteredResults.ebaySearch);
+	// console.log(unfilteredResults.ebayScrape);
 
 	//check for results
 	setHasResults({
@@ -140,7 +140,7 @@ export async function parseApiData(
 		setSoldAucListings
 	);
 
-	console.log('done');
+	// console.log('done');
 
 	return {
 		bin: binStats,
@@ -179,7 +179,7 @@ async function parseResults(arr1, arr2, formData, id, stateListing) {
 		}
 	});
 
-	console.log(id, arr2);
+	// console.log(id, arr2);
 
 	// --- Build arrays for price & listings ---
 	const priceArray = [];
