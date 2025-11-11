@@ -153,7 +153,11 @@ function App() {
 
 				{searchStatus && (
 					<Box sx={{ border: '1px solid', margin: '2', borderRadius: '2px' }}>
-						<Grid container spacing={2} sx={{ textAlign: 'center', ml: 2 }}>
+						<Grid
+							container
+							spacing={2}
+							sx={{ textAlign: 'center', ml: 2, mb: 4 }}
+						>
 							<Grid size={{ xs: 12, md: 6 }}>
 								<Results
 									boxLabel1={'Active Auction Data'}
@@ -170,7 +174,7 @@ function App() {
 									loading={loading}
 								/>
 							</Grid>
-							<Grid size={{ xs: 12, md: 6 }}>
+							{/* <Grid size={{ xs: 12, md: 6 }}>
 								<Results
 									boxLabel1={'Sold Auction Data'}
 									listingsArray={aucSoldListings}
@@ -185,7 +189,7 @@ function App() {
 									statsObject={binSoldStatsData}
 									loading={loading}
 								/>
-							</Grid>
+							</Grid> */}
 						</Grid>
 					</Box>
 				)}
