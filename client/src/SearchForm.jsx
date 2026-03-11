@@ -1,7 +1,7 @@
-import { FormControl, Box, TextField, Grid, Button } from '@mui/material';
+import { Box, TextField, Grid, Button } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 export default function SearchForm({
 	handleSubmit,

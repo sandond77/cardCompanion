@@ -19,7 +19,7 @@ app.use(
 	})
 );
 app.use(express.json());
-app.use(express.urlencoded({ extended: true })); //allows express to parse json)
+app.use(express.urlencoded({ extended: true }));
 
 app.use('/api', apiRoutes);
 

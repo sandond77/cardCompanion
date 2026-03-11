@@ -1,7 +1,6 @@
 import axios from 'axios';
 import puppeteer from 'puppeteer';
 
-//current listing utils
 export async function browseAPI(query, listingType) {
 	const token = await getEbayAccessToken();
 
@@ -38,63 +37,52 @@ export async function getEbayAccessToken() {
 	return tokenRes.data.access_token;
 }
 
-//sold listing utils
 export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 	const browser = await puppeteer.launch({
-		headless: true, // false to see browser
+		headless: 'new',
 		args: [
 			'--no-sandbox',
 			'--disable-setuid-sandbox',
 			'--disable-dev-shm-usage',
-			'--disable-blink-features=AutomationControlled',
-			'--disable-web-security',
 			'--window-size=1920,1080'
 		]
 	});
-	// const browser = await puppeteer.launch({ headless: false });
+
 	const page = await browser.newPage();
 
-	// This makes headless Chrome look like a normal Chrome
 	await page.evaluateOnNewDocument(() => {
 		Object.defineProperty(navigator, 'webdriver', { get: () => false });
 	});
 
 	await page.setUserAgent(
 		'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-			'(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+			'(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 	);
 
 	await page.setViewport({ width: 1920, height: 1080 });
 
-	let url = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(
-		query
-	)}&LH_Sold=1&LH_Complete=1&_sop=${sortOrder}`;
+	const baseUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=${sortOrder}`;
 
-	const urlAuction = url + '&LH_Auction=1';
-	const urlBin = url + '&LH_BIN=1';
+	const aucResults = await scrape(page, baseUrl + '&LH_Auction=1', maxPages);
+	const binResults = await scrape(page, baseUrl + '&LH_BIN=1', maxPages);
 
-	let aucResults = await scrape(page, urlAuction, maxPages);
-	let binResults = await scrape(page, urlBin, maxPages);
-
-	await page.close(); // close the page
-	await browser.close(); // close the browser
+	await page.close();
+	await browser.close();
 
 	return { aucResults, binResults };
 }
 
 async function scrape(page, url, maxPages) {
-	await page.goto(url, { waitUntil: 'networkidle2' });
-	await page.waitForSelector('.s-item, .su-card-container', {
-		visible: true,
-		timeout: 15000
-	});
+	await page.goto(url, { waitUntil: 'load' });
+	await new Promise(r => setTimeout(r, 5000)); // allow post-load JS to settle
+	await page.waitForSelector('.s-card', { visible: true, timeout: 15000 });
 
 	let results = [];
 
-	// helper lives in Node context
 	function cleanTitle(raw) {
 		if (!raw) return '';
 		return raw
+			.replace(/New Listing/gi, '')
 			.replace(/Opens in a new window or tab/gi, '')
 			.replace(/Shop on eBay/gi, '')
 			.trim();
@@ -103,60 +91,52 @@ async function scrape(page, url, maxPages) {
 	try {
 		let currentPage = 1;
 		while (currentPage <= maxPages) {
-			// collect raw data only inside browser
-			const rawListings = await page.$$eval(
-				'.s-item, .su-card-container',
-				(items) =>
-					items.map((item) => {
-						const get = (sel) =>
-							item.querySelector(sel)?.textContent?.trim() || '';
-						const getAttr = (sel, attr) =>
-							item.querySelector(sel)?.getAttribute(attr) || '';
+			const rawListings = await page.$$eval('.s-card', (items) =>
+				items.map((item) => {
+					const get = (sel) =>
+						item.querySelector(sel)?.textContent?.trim() || '';
+					const getAttr = (sel, attr) =>
+						item.querySelector(sel)?.getAttribute(attr) || '';
 
-						const rawTitle =
-							get('.s-item__title span') ||
-							get('.s-card__title span') ||
-							get('[data-testid="item-title"]') ||
-							get('.s-item__title') ||
-							getAttr('a.su-link', 'aria-label') ||
-							'';
+					const rawTitle = get('.s-card__title') || '';
 
-						const priceText =
-							get('.s-item__price') || get('.s-card__price') || '';
+					const priceText = get('.s-card__price') || '';
 
-						const soldDate =
-							get('.s-item__ended-date') ||
-							get('.s-item__title--tagblock span') ||
-							get('.su-styled-text.positive.default') ||
-							get('.s-card__caption .su-styled-text') ||
-							'';
+					// Scan all spans/divs for "Sold" date text
+					const allText = Array.from(item.querySelectorAll('span, div'))
+						.map((el) => el.textContent?.trim() || '')
+						.find((t) => /sold\s+\w+\s+\d/i.test(t)) || '';
 
-						const link =
-							getAttr('.s-item__link', 'href') ||
-							getAttr('a.su-link[href*="/itm/"]', 'href') ||
-							'';
+					const soldDate =
+						get('.s-card__caption') ||
+						get('.s-card__subtitle') ||
+						allText ||
+						'';
 
-						const seller =
-							get(
-								'.s-item__detail.s-item__detail--secondary .s-item__etrs-text span.PRIMARY'
-							) ||
-							get(
-								'.su-card-container__attributes__secondary .su-styled-text.primary.large'
-							) ||
-							'';
+					const link =
+						getAttr('.s-card__link', 'href') ||
+						getAttr('a[href*="/itm/"]', 'href') ||
+						'';
+
+					const sellerRaw =
+						get('.su-card-container__attributes__secondary') || '';
+					// Strip shipping notice, then grab username (before feedback %)
+					const seller = sellerRaw
+						.replace(/Customs services and international tracking provided/gi, '')
+						.split(/\s+\d+\.?\d*%/)[0]
+						.trim();
 
 						return { rawTitle, priceText, soldDate, link, seller };
-					})
+				})
 			);
 
-			// clean + normalize in Node
 			const pageListings = rawListings
 				.map((r) => {
 					const title = cleanTitle(r.rawTitle);
 
 					let date = '';
 					const match = r.soldDate.match(
-						/([A-Za-z]+ \d{1,2}, \d{4})|(\d{4}\/\d{1,2}\/\d{1,2})/
+						/([A-Za-z]+ \d{1,2}, \d{4})|(\d{4}\/\d{1,2}\/\d{1,2})|(\d{1,2}\/\d{1,2}\/\d{4})/
 					);
 					if (match) {
 						const d = new Date(match[0]);
@@ -185,29 +165,27 @@ async function scrape(page, url, maxPages) {
 					(item) =>
 						item.title &&
 						!item.title.toLowerCase().includes('shop on ebay') &&
-						item.price &&
+						item.price.value &&
 						item.link
 				);
 
 			results = results.concat(pageListings);
 
-			// safe navigation
 			const nextLink = await page.$('a.pagination__next');
 			if (nextLink && currentPage < maxPages) {
 				await Promise.all([
-					page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
+					page.waitForNavigation({ waitUntil: 'load', timeout: 60000 }),
 					nextLink.click()
 				]);
-				await page.waitForSelector('.s-item, .su-card-container', {
-					timeout: 15000
-				});
+				await new Promise(r => setTimeout(r, 3000));
+				await page.waitForSelector('.s-card', { timeout: 15000 });
 				currentPage++;
 			} else {
 				break;
 			}
 		}
 	} catch (e) {
-		console.error('error', e);
+		console.error('Scrape error:', e);
 	} finally {
 		return results;
 	}
