@@ -24,7 +24,7 @@ export default function ListingsTable({ listings }) {
 					{listings &&
 						listings.map((listing, index) => (
 							<TableRow
-								key={listing.id}
+								key={`${listing.id}-${index}`}
 								sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
 							>
 								<TableCell>{index + 1}</TableCell>

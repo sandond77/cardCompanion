@@ -102,16 +102,22 @@ async function scrape(page, url, maxPages) {
 
 					const priceText = get('.s-card__price') || '';
 
-					// Scan all spans/divs for "Sold" date text
-					const allText = Array.from(item.querySelectorAll('span, div'))
-						.map((el) => el.textContent?.trim() || '')
-						.find((t) => /sold\s+\w+\s+\d/i.test(t)) || '';
+					// Scan all spans/divs once, reuse for date and condition
+					const allSpans = Array.from(item.querySelectorAll('span, div'))
+						.map((el) => el.textContent?.trim() || '');
+
+					const allText = allSpans.find((t) => /sold\s+\w+\s+\d/i.test(t)) || '';
 
 					const soldDate =
 						get('.s-card__caption') ||
 						get('.s-card__subtitle') ||
 						allText ||
 						'';
+
+					// Scan for condition text (Near Mint, Lightly Played, etc.)
+					const conditionText = allSpans.find((t) =>
+						/^(near mint|lightly played|moderately played|heavily played|damaged)/i.test(t)
+					) || '';
 
 					const link =
 						getAttr('.s-card__link', 'href') ||
@@ -126,7 +132,7 @@ async function scrape(page, url, maxPages) {
 						.split(/\s+\d+\.?\d*%/)[0]
 						.trim();
 
-						return { rawTitle, priceText, soldDate, link, seller };
+					return { rawTitle, priceText, soldDate, conditionText, link, seller };
 				})
 			);
 
@@ -156,6 +162,7 @@ async function scrape(page, url, maxPages) {
 						itemId,
 						title,
 						price: { value: r.priceText, currency: 'USD' },
+						condition: r.conditionText,
 						date,
 						link: fixedLink,
 						seller: { username: r.seller }

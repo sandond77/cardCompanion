@@ -51,8 +51,21 @@ function App() {
 
 	const handleSubmit = async (formData) => {
 		resetStates();
-		const parsedFormData = Object.values(formData).filter(Boolean).join(' ');
-		setQueryTerm(parsedFormData);
+		const { grade, condition, cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName } = formData;
+
+		// Graded: Grade leads the query. Raw: start from Card Name (condition filtered client-side).
+		const queryParts = grade
+			? [grade, cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName]
+			: [cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName];
+
+		const parsedFormData = queryParts.filter(Boolean).join(' ');
+
+		// Display query: raw cards append condition as a label (not sent to eBay)
+		const displayQuery = condition
+			? `${parsedFormData}  |  Condition Filter: ${condition}`
+			: parsedFormData;
+
+		setQueryTerm(displayQuery);
 		setSearchStatus(true);
 		try {
 			setLoading(true);

@@ -12,10 +12,9 @@ router.get('/search', async (req, res) => {
 			browseAPI(query, 'AUCTION')
 		]);
 
-		res.json({
-			bin: binResults.data.itemSummaries,
-			auction: aucResults.data.itemSummaries
-		});
+		const bin = binResults.data.itemSummaries ?? [];
+		const auction = aucResults.data.itemSummaries ?? [];
+		res.json({ bin, auction });
 	} catch (err) {
 		console.error(err.response?.data || err.message);
 		res.status(500).json({ error: 'eBay API call failed' });

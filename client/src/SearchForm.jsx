@@ -1,7 +1,16 @@
-import { Box, TextField, Grid, Button } from '@mui/material';
+import {
+	Box,
+	TextField,
+	Grid,
+	Button,
+	MenuItem,
+	Alert
+} from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import { useState } from 'react';
+
+const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 
 export default function SearchForm({
 	handleSubmit,
@@ -10,40 +19,52 @@ export default function SearchForm({
 }) {
 	const [formData, setFormData] = useState({
 		grade: '',
+		condition: '',
 		cardName: '',
 		cardNumber: '',
 		cardRarity: '',
 		cardGame: '',
 		cardLanguage: '',
-		setName: '',
-		additionalDetail: ''
+		year: '',
+		additionalDetail: '',
+		setName: ''
 	});
+
+	const [conflictError, setConflictError] = useState(false);
 
 	const handleReset = (event) => {
 		event.preventDefault();
-		// console.log('reset hit');
 		setFormData({
 			grade: '',
+			condition: '',
 			cardName: '',
 			cardNumber: '',
 			cardRarity: '',
 			cardGame: '',
 			cardLanguage: '',
-			setName: '',
-			additionalDetail: ''
+			year: '',
+			additionalDetail: '',
+			setName: ''
 		});
+		setConflictError(false);
 		resetStates();
 	};
 
 	const handleChange = (event) => {
-		setFormData((prevData) => ({
-			...prevData,
-			[event.target.name]: event.target.value
-		}));
+		const { name, value } = event.target;
+		setFormData((prevData) => {
+			const updated = { ...prevData, [name]: value };
+			setConflictError(!!updated.grade && !!updated.condition);
+			return updated;
+		});
 	};
 
 	const submitForm = (event) => {
 		event.preventDefault();
+		if (formData.grade && formData.condition) {
+			setConflictError(true);
+			return;
+		}
 		setQueryTerm('');
 		handleSubmit(formData);
 	};
@@ -59,7 +80,25 @@ export default function SearchForm({
 						fullWidth
 						value={formData.grade}
 						onChange={handleChange}
+						error={conflictError}
 					/>
+				</Grid>
+				<Grid size={{ xs: 12, md: 2 }}>
+					<TextField
+						select
+						id="condition"
+						label="Condition"
+						name="condition"
+						fullWidth
+						value={formData.condition}
+						onChange={handleChange}
+						error={conflictError}
+					>
+						<MenuItem value=""><em>None</em></MenuItem>
+						{CONDITIONS.map((c) => (
+							<MenuItem key={c} value={c}>{c}</MenuItem>
+						))}
+					</TextField>
 				</Grid>
 				<Grid size={{ xs: 12, md: 4 }}>
 					<TextField
@@ -82,7 +121,7 @@ export default function SearchForm({
 						onChange={handleChange}
 					/>
 				</Grid>
-				<Grid size={{ xs: 12, md: 4 }}>
+				<Grid size={{ xs: 12, md: 2 }}>
 					<TextField
 						id="cardRarity"
 						name="cardRarity"
@@ -92,7 +131,17 @@ export default function SearchForm({
 						onChange={handleChange}
 					/>
 				</Grid>
-				<Grid size={{ xs: 12, md: 4 }}>
+				<Grid size={{ xs: 12, md: 1 }}>
+					<TextField
+						id="year"
+						name="year"
+						label="Year"
+						fullWidth
+						value={formData.year}
+						onChange={handleChange}
+					/>
+				</Grid>
+				<Grid size={{ xs: 12, md: 3 }}>
 					<TextField
 						required
 						id="cardGame"
@@ -103,7 +152,7 @@ export default function SearchForm({
 						onChange={handleChange}
 					/>
 				</Grid>
-				<Grid size={{ xs: 12, md: 4 }}>
+				<Grid size={{ xs: 12, md: 3 }}>
 					<TextField
 						id="cardLanguage"
 						name="cardLanguage"
@@ -113,7 +162,7 @@ export default function SearchForm({
 						onChange={handleChange}
 					/>
 				</Grid>
-				<Grid size={{ xs: 12, md: 4 }}>
+				<Grid size={{ xs: 12, md: 5 }}>
 					<TextField
 						id="additionalDetail"
 						name="additionalDetail"
@@ -133,6 +182,13 @@ export default function SearchForm({
 						onChange={handleChange}
 					/>
 				</Grid>
+				{conflictError && (
+					<Grid size={{ xs: 12 }}>
+						<Alert severity="error">
+							Grade and Condition cannot both be filled — they are mutually exclusive. Please clear one before searching.
+						</Alert>
+					</Grid>
+				)}
 			</Grid>
 			<Button
 				variant="contained"
