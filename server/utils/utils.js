@@ -44,6 +44,9 @@ export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 			'--no-sandbox',
 			'--disable-setuid-sandbox',
 			'--disable-dev-shm-usage',
+			'--disable-gpu',
+			'--no-zygote',
+			'--single-process',
 			'--window-size=1920,1080'
 		]
 	});
