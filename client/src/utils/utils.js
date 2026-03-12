@@ -69,64 +69,48 @@ function matchesRawCondition(result, selectedCondition) {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function queryEbay(params) {
-	try {
-		const [ebaySearch, ebayScrape] = await Promise.all([
-			axios.get(`${API_BASE_URL}/api/search?${params}`),
-			axios.get(`${API_BASE_URL}/api/scrape?${params}`)
-		]);
-		return { ebaySearch, ebayScrape };
-	} catch (error) {
-		console.error('Error querying eBay API:', error);
-		throw error;
-	}
-}
-
-export async function parseApiData(
-	parsedFormData,
-	formData,
-	setAucListings,
-	setBinListings,
-	setSoldAucListings,
-	setSoldBinListings,
-	setHasResults
-) {
+export async function parseSearchData(parsedFormData, formData, setAucListings, setBinListings, setHasResults) {
 	const queryParams = new URLSearchParams({ q: parsedFormData }).toString();
+	const res = await axios.get(`${API_BASE_URL}/api/search?${queryParams}`);
+	const binResults = res.data.bin ?? [];
+	const aucResults = res.data.auction ?? [];
 
-	const unfilteredResults = await queryEbay(queryParams);
-	const filteredBinResults = unfilteredResults?.ebaySearch?.data?.bin ?? [];
-	const filteredAucResults = unfilteredResults?.ebaySearch?.data?.auction ?? [];
-	const filteredSoldBinResults = unfilteredResults?.ebayScrape?.data?.binSold ?? [];
-
-	const filteredSoldAucResults = unfilteredResults?.ebayScrape?.data?.aucSold ?? [];
-
-	setHasResults({
-		bin: filteredBinResults.length > 0,
-		auc: filteredAucResults.length > 0,
-		soldBin: filteredSoldBinResults.length > 0,
-		soldAuc: filteredSoldAucResults.length > 0
-	});
-
-	const allEmpty =
-		filteredBinResults.length === 0 &&
-		filteredAucResults.length === 0 &&
-		filteredSoldBinResults.length === 0 &&
-		filteredSoldAucResults.length === 0;
-
-	if (allEmpty) return;
+	setHasResults((prev) => ({
+		...prev,
+		bin: binResults.length > 0,
+		auc: aucResults.length > 0
+	}));
 
 	const maybeParse = async (arr, type, setListings) => {
 		if (arr.length === 0) return undefined;
-		const out = [];
-		return await parseResults(arr, out, formData, type, setListings);
+		return parseResults(arr, [], formData, type, setListings);
 	};
 
-	const binStats    = await maybeParse(filteredBinResults,     'bin',     setBinListings);
-	const aucStats    = await maybeParse(filteredAucResults,     'auc',     setAucListings);
-	const binSoldStats = await maybeParse(filteredSoldBinResults, 'soldBin', setSoldBinListings);
-	const aucSoldStats = await maybeParse(filteredSoldAucResults, 'soldAuc', setSoldAucListings);
+	const binStats = await maybeParse(binResults, 'bin', setBinListings);
+	const aucStats = await maybeParse(aucResults, 'auc', setAucListings);
+	return { bin: binStats, auc: aucStats };
+}
 
-	return { bin: binStats, auc: aucStats, binSold: binSoldStats, aucSold: aucSoldStats };
+export async function parseScrapeData(parsedFormData, formData, setSoldAucListings, setSoldBinListings, setHasResults) {
+	const queryParams = new URLSearchParams({ q: parsedFormData }).toString();
+	const res = await axios.get(`${API_BASE_URL}/api/scrape?${queryParams}`);
+	const soldBinResults = res.data.binSold ?? [];
+	const soldAucResults = res.data.aucSold ?? [];
+
+	setHasResults((prev) => ({
+		...prev,
+		soldBin: soldBinResults.length > 0,
+		soldAuc: soldAucResults.length > 0
+	}));
+
+	const maybeParse = async (arr, type, setListings) => {
+		if (arr.length === 0) return undefined;
+		return parseResults(arr, [], formData, type, setListings);
+	};
+
+	const binSoldStats = await maybeParse(soldBinResults, 'soldBin', setSoldBinListings);
+	const aucSoldStats = await maybeParse(soldAucResults, 'soldAuc', setSoldAucListings);
+	return { binSold: binSoldStats, aucSold: aucSoldStats };
 }
 
 async function parseResults(arr1, arr2, formData, _id, stateListing) {

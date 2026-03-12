@@ -10,11 +10,10 @@ import {
 } from '@mui/material';
 import SearchForm from './SearchForm';
 import Results from './Results';
-import { parseApiData } from './utils/utils';
+import { parseSearchData, parseScrapeData } from './utils/utils';
 
 function App() {
 	const [searchStatus, setSearchStatus] = useState(false);
-	const [statistics, setStatistics] = useState('');
 	const [queryTerm, setQueryTerm] = useState('');
 	const [aucStatsData, setAucStatsData] = useState('');
 	const [binStatsData, setBinStatsData] = useState('');
@@ -24,7 +23,8 @@ function App() {
 	const [binListings, setBinListings] = useState('');
 	const [aucSoldListings, setAucSoldListings] = useState('');
 	const [binSoldListings, setBinSoldListings] = useState('');
-	const [loading, setLoading] = useState(false);
+	const [loadingActive, setLoadingActive] = useState(false);
+	const [loadingSold, setLoadingSold] = useState(false);
 	const [hasResults, setHasResults] = useState({
 		bin: false,
 		auc: false,
@@ -53,74 +53,41 @@ function App() {
 		resetStates();
 		const { grade, condition, cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName } = formData;
 
-		// Graded: Grade leads the query. Raw: start from Card Name (condition filtered client-side).
 		const queryParts = grade
 			? [grade, cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName]
 			: [cardName, cardNumber, cardRarity, year, cardGame, cardLanguage, additionalDetail, setName];
 
 		const parsedFormData = queryParts.filter(Boolean).join(' ');
 
-		// Display query: raw cards append condition as a label (not sent to eBay)
 		const displayQuery = condition
 			? `${parsedFormData}  |  Condition Filter: ${condition}`
 			: parsedFormData;
 
 		setQueryTerm(displayQuery);
 		setSearchStatus(true);
-		try {
-			setLoading(true);
-			setStatistics(
-				await parseApiData(
-					parsedFormData,
-					formData,
-					setAucListings,
-					setBinListings,
-					setAucSoldListings,
-					setBinSoldListings,
-					setHasResults
-				)
-			);
-		} finally {
-			setLoading(false);
-		}
+
+		// Fire active and sold fetches independently — active results show immediately
+		setLoadingActive(true);
+		parseSearchData(parsedFormData, formData, setAucListings, setBinListings, setHasResults)
+			.then((stats) => {
+				if (stats?.bin) setBinStatsData({ Average: `$${stats.bin.Average}`, Low: `$${stats.bin.Lowest}`, High: `$${stats.bin.Highest}`, '# of Listings': stats.bin['Data Points'] });
+				if (stats?.auc) setAucStatsData({ Average: `$${stats.auc.Average}`, Low: `$${stats.auc.Lowest}`, High: `$${stats.auc.Highest}`, '# of Listings': stats.auc['Data Points'] });
+			})
+			.catch((err) => console.error('Search error:', err))
+			.finally(() => setLoadingActive(false));
+
+		setLoadingSold(true);
+		parseScrapeData(parsedFormData, formData, setAucSoldListings, setBinSoldListings, setHasResults)
+			.then((stats) => {
+				if (stats?.binSold) setBinSoldStatsData({ Average: `$${stats.binSold.Average}`, Low: `$${stats.binSold.Lowest}`, High: `$${stats.binSold.Highest}`, '# of Listings': stats.binSold['Data Points'] });
+				if (stats?.aucSold) setAucSoldStatsData({ Average: `$${stats.aucSold.Average}`, Low: `$${stats.aucSold.Lowest}`, High: `$${stats.aucSold.Highest}`, '# of Listings': stats.aucSold['Data Points'] });
+			})
+			.catch((err) => console.error('Scrape error:', err))
+			.finally(() => setLoadingSold(false));
 	};
 
-	useEffect(() => {
-		if (!searchStatus) return;
-
-		if (hasResults.bin) {
-			setBinStatsData({
-				Average: `$${statistics.bin.Average}`,
-				Low: `$${statistics.bin.Lowest}`,
-				High: `$${statistics.bin.Highest}`,
-				'# of Listings': statistics.bin['Data Points']
-			});
-		}
-		if (hasResults.auc) {
-			setAucStatsData({
-				Average: `$${statistics.auc.Average}`,
-				Low: `$${statistics.auc.Lowest}`,
-				High: `$${statistics.auc.Highest}`,
-				'# of Listings': statistics.auc['Data Points']
-			});
-		}
-		if (hasResults.soldAuc) {
-			setAucSoldStatsData({
-				Average: `$${statistics.aucSold.Average}`,
-				Low: `$${statistics.aucSold.Lowest}`,
-				High: `$${statistics.aucSold.Highest}`,
-				'# of Listings': statistics.aucSold['Data Points']
-			});
-		}
-		if (hasResults.soldBin) {
-			setBinSoldStatsData({
-				Average: `$${statistics.binSold.Average}`,
-				Low: `$${statistics.binSold.Lowest}`,
-				High: `$${statistics.binSold.Highest}`,
-				'# of Listings': statistics.binSold['Data Points']
-			});
-		}
-	}, [statistics, hasResults]);
+	// hasResults is still used to conditionally render stats (kept for Results component)
+	useEffect(() => {}, [hasResults]);
 
 	return (
 		<ThemeProvider theme={theme}>
@@ -161,7 +128,7 @@ function App() {
 									boxLabel1={'Active Auction Data'}
 									listingsArray={aucListings}
 									statsObject={aucStatsData}
-									loading={loading}
+									loading={loadingActive}
 								/>
 							</Grid>
 							<Grid size={{ xs: 12, md: 6 }}>
@@ -169,7 +136,7 @@ function App() {
 									boxLabel1={'Active BIN Data'}
 									listingsArray={binListings}
 									statsObject={binStatsData}
-									loading={loading}
+									loading={loadingActive}
 								/>
 							</Grid>
 							<Grid size={{ xs: 12, md: 6 }}>
@@ -177,7 +144,7 @@ function App() {
 									boxLabel1={'Sold Auction Data'}
 									listingsArray={aucSoldListings}
 									statsObject={aucSoldStatsData}
-									loading={loading}
+									loading={loadingSold}
 								/>
 							</Grid>
 							<Grid size={{ xs: 12, md: 6 }}>
@@ -185,7 +152,7 @@ function App() {
 									boxLabel1={'Sold BIN Data'}
 									listingsArray={binSoldListings}
 									statsObject={binSoldStatsData}
-									loading={loading}
+									loading={loadingSold}
 								/>
 							</Grid>
 						</Grid>
