@@ -31,6 +31,14 @@ router.get('/scrape', async (req, res) => {
 			aucSold: scrapeResults.aucResults
 		});
 	} catch (err) {
+		if (err.code === 'EBAY_BLOCKED') {
+			console.warn('Scrape blocked by eBay bot check:', req.query.q);
+			return res.status(503).json({
+				error:
+					'eBay is currently serving a bot check instead of sold listings. ' +
+					'Active listings are unaffected — try sold data again in a few minutes.'
+			});
+		}
 		console.error(err.response?.data || err.message);
 		res.status(500).json({ error: 'Scrape failed' });
 	}

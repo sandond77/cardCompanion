@@ -37,6 +37,34 @@ export async function getEbayAccessToken() {
 	return tokenRes.data.access_token;
 }
 
+/** eBay served its bot-check interstitial instead of search results. */
+export class ScrapeBlockedError extends Error {
+	constructor() {
+		super('eBay served a verification page instead of search results.');
+		this.name = 'ScrapeBlockedError';
+		this.code = 'EBAY_BLOCKED';
+	}
+}
+
+/**
+ * Detect eBay's "Security Measure" interstitial. When it appears, the search
+ * results never render and waiting for them just burns the timeout.
+ */
+// eBay routes bot checks through several splashui paths ("captcha", "challenge")
+// and sometimes bounces via the sign-in host.
+const BLOCK_URL = /splashui\/\w+|signin\.ebay\.com/i;
+
+async function isBlocked(page) {
+	try {
+		if (BLOCK_URL.test(page.url())) return true;
+		return /security measure/i.test(await page.title());
+	} catch {
+		// eBay redirected us mid-check and detached the frame. Re-read the URL,
+		// which stays available even once the old frame is gone.
+		return BLOCK_URL.test(page.url());
+	}
+}
+
 export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 	const browser = await puppeteer.launch({
 		headless: 'new',
@@ -51,34 +79,49 @@ export async function scrapeSoldListings(query, sortOrder = 12, maxPages = 3) {
 		]
 	});
 
-	const page = await browser.newPage();
+	// Always tear the browser down — an early throw here used to skip close()
+	// and leak a Chrome process per failed request.
+	try {
+		const page = await browser.newPage();
 
-	await page.evaluateOnNewDocument(() => {
-		Object.defineProperty(navigator, 'webdriver', { get: () => false });
-	});
+		await page.evaluateOnNewDocument(() => {
+			Object.defineProperty(navigator, 'webdriver', { get: () => false });
+		});
 
-	await page.setUserAgent(
-		'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-			'(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-	);
+		await page.setUserAgent(
+			'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+				'(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+		);
 
-	await page.setViewport({ width: 1920, height: 1080 });
+		await page.setViewport({ width: 1920, height: 1080 });
 
-	const baseUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=${sortOrder}`;
+		const baseUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(query)}&LH_Sold=1&LH_Complete=1&_sop=${sortOrder}`;
 
-	const aucResults = await scrape(page, baseUrl + '&LH_Auction=1', maxPages);
-	const binResults = await scrape(page, baseUrl + '&LH_BIN=1', maxPages);
+		const aucResults = await scrape(page, baseUrl + '&LH_Auction=1', maxPages);
+		const binResults = await scrape(page, baseUrl + '&LH_BIN=1', maxPages);
 
-	await page.close();
-	await browser.close();
-
-	return { aucResults, binResults };
+		return { aucResults, binResults };
+	} finally {
+		await browser.close().catch(() => {});
+	}
 }
 
 async function scrape(page, url, maxPages) {
 	await page.goto(url, { waitUntil: 'load' });
 	await new Promise(r => setTimeout(r, 5000)); // allow post-load JS to settle
-	await page.waitForSelector('.s-card', { visible: true, timeout: 15000 });
+
+	// Distinguish "eBay blocked us" from "this search has no results" — both
+	// used to surface as an identical selector timeout.
+	if (await isBlocked(page)) throw new ScrapeBlockedError();
+
+	try {
+		await page.waitForSelector('.s-card', { visible: true, timeout: 15000 });
+	} catch {
+		console.warn(
+			`No .s-card elements on ${page.url()} — empty result set, or eBay changed its layout again.`
+		);
+		return [];
+	}
 
 	let results = [];
 
@@ -195,8 +238,12 @@ async function scrape(page, url, maxPages) {
 			}
 		}
 	} catch (e) {
+		// A `return` inside `finally` used to sit here, which swallowed every
+		// error — including real bugs — and made failures invisible.
+		if (e.code === 'EBAY_BLOCKED') throw e;
 		console.error('Scrape error:', e);
-	} finally {
-		return results;
 	}
+
+	// Partial pages are still useful; keep whatever we read before the failure.
+	return results;
 }

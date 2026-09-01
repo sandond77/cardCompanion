@@ -7,14 +7,22 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 const app = express();
 
+// Extra production origins come from CLIENT_ORIGIN (comma-separated), so a new
+// deploy target only needs an env var rather than a code change.
+const allowedOrigins = [
+	'http://localhost:3000',
+	'http://localhost:3001',
+	'http://localhost:5173',
+	'https://cardcompanion.onrender.com',
+	...(process.env.CLIENT_ORIGIN || '')
+		.split(',')
+		.map((o) => o.trim())
+		.filter(Boolean)
+];
+
 app.use(
 	cors({
-		origin: [
-			'http://localhost:3000',
-			'http://localhost:3001',
-			'http://localhost:5173',
-			'https://cardcompanion.onrender.com'
-		],
+		origin: allowedOrigins,
 		credentials: true
 	})
 );
