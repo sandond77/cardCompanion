@@ -258,6 +258,18 @@ export async function fetchListings(source, query, formData) {
 		params: { q: query }
 	});
 
+	// A misconfigured API base (missing https://, or pointing at the site rather
+	// than the API) lands on the SPA fallback, which answers 200 with index.html.
+	// Without this check that parses as "no listings" and fails silently.
+	const gotBuckets = Object.values(buckets).some((f) => Array.isArray(data?.[f]));
+	if (!gotBuckets) {
+		throw new Error(
+			`${path} did not return listing data. Check VITE_API_URL — it must be the ` +
+				`full API origin including https://, not the site's own domain. ` +
+				`Currently: ${API_BASE_URL || '(unset)'}`
+		);
+	}
+
 	return Object.fromEntries(
 		Object.entries(buckets).map(([bucket, field]) => {
 			const listings = selectMatching(data[field] ?? [], formData);
