@@ -204,17 +204,6 @@ function App() {
 							))}
 						</div>
 
-						{!SOLD_ENABLED && (
-							<p className="mt-4 rounded-lg border border-line bg-surface/60 px-4 py-3 text-xs leading-relaxed text-ink-faint">
-								<span className="font-medium text-ink-dim">
-									Sold comps are temporarily unavailable.
-								</span>{' '}
-								eBay is currently blocking automated access to completed
-								listings, so only current asking prices are shown. Asking prices
-								run higher than realized sale prices — treat these as a ceiling,
-								not a valuation.
-							</p>
-						)}
 					</>
 				)}
 			</main>
