@@ -1,51 +1,25 @@
-import * as React from 'react';
-import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
-import Typography from '@mui/material/Typography';
-import Modal from '@mui/material/Modal';
+import { useCallback, useState } from 'react';
+import Modal from './ui/Modal';
 import ListingsTable from './ListingsTable.jsx';
 
-const style = {
-	position: 'absolute',
-	top: '50%',
-	left: '50%',
-	transform: 'translate(-50%, -50%)',
-	width: 'min(90vw, 800px)',
-	maxHeight: '80vh',
-	bgcolor: 'background.paper',
-	border: '2px solid #000',
-	boxShadow: 24,
-	p: 4,
-	overflowY: 'auto',
-	overflowX: 'auto'
-};
-
-export default function ListingsModal({ listings }) {
-	const [open, setOpen] = React.useState(false);
-	const handleOpen = () => setOpen(true);
-	const handleClose = () => setOpen(false);
+export default function ListingsModal({ listings, label, isSold, children }) {
+	const [open, setOpen] = useState(false);
+	const handleOpen = useCallback(() => setOpen(true), []);
+	const handleClose = useCallback(() => setOpen(false), []);
 
 	return (
 		<>
-			<Box>
-				{/* <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}></Box> */}
-				<Button variant="contained" onClick={handleOpen}>
-					{listings[0].date ? 'View Active Listings' : 'View Sold Listings'}
-				</Button>
-			</Box>
+			{children(handleOpen)}
 
 			<Modal
 				open={open}
 				onClose={handleClose}
-				aria-labelledby="modal-modal-title"
-				aria-describedby="modal-modal-description"
+				title={label}
+				subtitle={`${listings.length} ${isSold ? 'sold' : 'active'} listing${
+					listings.length === 1 ? '' : 's'
+				}`}
 			>
-				<Box sx={style}>
-					<Typography id="modal-modal-title" variant="h6" component="h2">
-						Listings
-					</Typography>
-					<ListingsTable listings={listings} />
-				</Box>
+				<ListingsTable listings={listings} isSold={isSold} />
 			</Modal>
 		</>
 	);

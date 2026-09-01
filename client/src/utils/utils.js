@@ -1,192 +1,267 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Optional chaining so the module can also be imported outside a Vite bundle.
+const API_BASE_URL = import.meta.env?.VITE_API_URL || 'http://localhost:3001';
 
-// ── Condition mapping ────────────────────────────────────────────────────────
+// ── Domain constants ─────────────────────────────────────────────────────────
 
-// eBay TCG condition strings (as returned in the "Ungraded - [detail]" format)
-// "Very good" maps to MP in eBay's TCG scale, not LP
+// eBay TCG condition strings, as returned in the "Ungraded - [detail]" format.
+// "Very good" maps to MP on eBay's TCG scale, not LP.
 const CONDITION_MAP = {
-	NM:  ['near mint', 'near mint or better'],
-	LP:  ['lightly played'],
-	MP:  ['moderately played', 'very good'],
-	HP:  ['heavily played', 'acceptable'],
+	NM: ['near mint', 'near mint or better'],
+	LP: ['lightly played'],
+	MP: ['moderately played', 'very good'],
+	HP: ['heavily played', 'acceptable'],
 	DMG: ['damaged', 'damaged/broken', 'for parts', 'for parts or not working']
 };
 
-// Major graders excluded by name alone (unambiguous abbreviations).
-// Smaller/regional graders (ars, ace, tag) still require a number to avoid false positives.
-const GRADING_REGEX = /\b(psa|bgs|cgc|sgc|hga)\b|\b(ars|ace|tag)\s*\d/i;
+// Grading companies we can recognize in a listing title. `alias` covers the
+// other names sellers write for the same grader.
+//
+// `strict: true` means the abbreviation is unambiguous enough to identify a
+// graded card on its own. The rest are ordinary English words ("ace", "tag")
+// and need a number beside them before we treat them as a grade.
+const GRADERS = [
+	{ key: 'PSA', alias: ['psa'], strict: true },
+	{ key: 'BGS', alias: ['bgs', 'beckett'], strict: true },
+	{ key: 'CGC', alias: ['cgc'], strict: true },
+	{ key: 'SGC', alias: ['sgc'], strict: true },
+	{ key: 'HGA', alias: ['hga'], strict: true },
+	{ key: 'ARS', alias: ['ars'], strict: false },
+	{ key: 'ACE', alias: ['ace'], strict: false },
+	{ key: 'TAG', alias: ['tag'], strict: false }
+];
 
-// ── Graded card algorithm ────────────────────────────────────────────────────
+const namesOf = (strict) =>
+	GRADERS.filter((g) => g.strict === strict)
+		.flatMap((g) => g.alias)
+		.join('|');
 
-function filterGraded(listings, grade) {
-	const normalized = grade.toLowerCase().replace(/\s/g, '');
-	if (normalized.startsWith('psa')) {
-		const num = normalized.replace('psa', '');
-		const re = new RegExp(`psa\\s*${num}\\b`, 'i');
-		return listings.filter((r) => re.test(r.title));
-	}
-	return listings;
+// Used by the raw path to exclude anything that looks graded.
+const GRADING_REGEX = new RegExp(
+	`\\b(${namesOf(true)})\\b|\\b(${namesOf(false)})\\s*\\d`,
+	'i'
+);
+
+// Fields that contribute to the eBay query string, in the order they appear.
+// `condition` is deliberately absent — it filters results, it is not searched.
+const QUERY_FIELDS = [
+	'cardName',
+	'cardNumber',
+	'cardRarity',
+	'year',
+	'cardGame',
+	'cardLanguage',
+	'additionalDetail',
+	'setName'
+];
+
+// The two data sources differ only by route and by the keys the server returns.
+const SOURCES = {
+	active: { path: '/api/search', buckets: { auc: 'auction', bin: 'bin' } },
+	sold: { path: '/api/scrape', buckets: { aucSold: 'aucSold', binSold: 'binSold' } }
+};
+
+// ── Query building ───────────────────────────────────────────────────────────
+
+/** Collapse the form into the single search string sent to eBay. */
+export function buildQuery(formData) {
+	const parts = formData.grade ? [formData.grade] : [];
+	for (const field of QUERY_FIELDS) parts.push(formData[field]);
+	return parts.filter(Boolean).join(' ');
 }
 
-// ── Raw card algorithm ───────────────────────────────────────────────────────
+// ── Matching ─────────────────────────────────────────────────────────────────
 
-function filterRaw(listings, condition) {
-	return listings.filter((r) => {
-		// Exclude if title contains grading company + number
-		if (GRADING_REGEX.test(r.title)) return false;
-		// Exclude if eBay's condition field explicitly says "Graded"
-		if ((r.condition || '').toLowerCase() === 'graded') return false;
+const squash = (s) => (s || '').toLowerCase().replace(/\s/g, '');
 
-		if (!condition) return true;
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-		return matchesRawCondition(r, condition);
-	});
+/**
+ * Split a typed grade ("PSA 10", "bgs9.5", "Beckett 9.5", "CGC") into the
+ * grader it names and the number beside it. Returns null when the text names no
+ * grader we know — the caller then declines to filter rather than guessing.
+ */
+function parseGrade(grade) {
+	const match = (grade || '').trim().toLowerCase().match(/^([a-z]+)\s*([\d.]*)$/);
+	if (!match) return null;
+
+	const [, name, number] = match;
+	const grader = GRADERS.find((g) => g.alias.includes(name));
+	return grader ? { grader, number } : null;
 }
 
-function matchesRawCondition(result, selectedCondition) {
-	const terms = CONDITION_MAP[selectedCondition] || [];
+/**
+ * Graded path: keep only listings whose title carries the requested grade.
+ *
+ * Matching is deliberately tight on the number. A search for "PSA 9" must not
+ * pull in "PSA 9.5" or "PSA 95", so the digits are followed by a lookahead
+ * rejecting any further digit or decimal.
+ */
+function matchesGrade(result, grade) {
+	const parsed = parseGrade(grade);
+	// Unrecognized grader — let eBay's own relevance ranking decide instead of
+	// filtering every result away.
+	if (!parsed) return true;
+
+	const { grader, number } = parsed;
+	const names = grader.alias.join('|');
+
+	const pattern = number
+		? `\\b(?:${names})[\\s-]*${escapeRegex(number)}(?!\\d|\\.\\d)`
+		: `\\b(?:${names})\\b`;
+
+	return new RegExp(pattern, 'i').test(result.title);
+}
+
+/** Raw path: drop anything graded, then match the requested condition. */
+function matchesRaw(result, condition) {
+	if (GRADING_REGEX.test(result.title)) return false;
+	if ((result.condition || '').toLowerCase() === 'graded') return false;
+	if (!condition) return true;
+
+	const terms = CONDITION_MAP[condition] || [];
 	const conditionField = (result.condition || '').toLowerCase();
-	const title = (result.title || '').toLowerCase();
 
-	// eBay provides granular condition as "Ungraded - Moderately played (Very good)"
-	// When that detail is present, use it directly for precise matching
+	// eBay gives granular condition as "Ungraded - Moderately played (Very good)".
+	// When that detail is present it is authoritative.
 	if (conditionField.includes(' - ')) {
 		return terms.some((t) => conditionField.includes(t));
 	}
 
-	// Title scan: seller put NM/LP/[NM] etc. in the title
-	const abbrevRegex = new RegExp(`\\b${selectedCondition}\\b`, 'i');
-	if (abbrevRegex.test(title) || terms.some((t) => title.includes(t))) {
-		return true;
+	// Otherwise scan the title for a seller-written abbreviation or full term.
+	const title = (result.title || '').toLowerCase();
+	if (new RegExp(`\\b${condition}\\b`, 'i').test(title)) return true;
+	if (terms.some((t) => title.includes(t))) return true;
+
+	// Condition is undeterminable from either field — show it and let the user
+	// judge from the title rather than silently dropping a real comp.
+	return true;
+}
+
+/** Every listing takes exactly one of the two condition paths. */
+function matchesConditionPath(result, grade, condition) {
+	return grade ? matchesGrade(result, grade) : matchesRaw(result, condition);
+}
+
+/** eBay search is fuzzy; re-check the card's identifying attributes ourselves. */
+function matchesCardIdentity(result, targets) {
+	const title = squash(result.title);
+	return targets.every((t) => title.includes(t));
+}
+
+// ── Normalization ────────────────────────────────────────────────────────────
+
+/** Shape a raw eBay result into the listing the UI renders, or null if unusable. */
+function toListing(result) {
+	const { value, currency } = result.price || result.currentBidPrice || {};
+	if (!value || currency !== 'USD') return null;
+
+	// Scraped prices arrive as display text ("$73.41"); API prices as strings.
+	const price = parseFloat(String(value).replace(/[^0-9.]/g, ''));
+	if (!Number.isFinite(price)) return null;
+
+	return {
+		id: result.itemId || '',
+		title: result.title || '',
+		url: result.itemWebUrl || result.link || '',
+		seller: result.seller?.username || '',
+		price: Math.round(price * 100) / 100,
+		date: result.date || ''
+	};
+}
+
+/** Newest first; undated listings (active ones) sort after dated ones. */
+function byNewestFirst(a, b) {
+	if (!a.date || !b.date) return a.date ? -1 : b.date ? 1 : 0;
+	return new Date(b.date) - new Date(a.date);
+}
+
+/**
+ * Filter, deduplicate, and normalize raw eBay results in a single pass.
+ * Pure — no network, no state.
+ */
+export function selectMatching(rawResults, formData) {
+	const { grade, condition } = formData;
+	const targets = [formData.cardName, formData.cardNumber, formData.setName]
+		.map(squash)
+		.filter(Boolean);
+
+	const seen = new Set();
+	const listings = [];
+
+	for (const result of rawResults) {
+		if (!result?.title) continue;
+		if (!matchesConditionPath(result, grade, condition)) continue;
+		if (!matchesCardIdentity(result, targets)) continue;
+
+		const id = result.itemId || result.itemWebUrl || result.link;
+		if (!id || seen.has(id)) continue;
+
+		const listing = toListing(result);
+		if (!listing) continue;
+
+		seen.add(id);
+		listings.push(listing);
 	}
 
-	// Can't determine condition from either field or title — pass through
-	// (relaxed: show the listing, let the user assess from the title)
-	return true;
+	return listings.sort(byNewestFirst);
+}
+
+// ── Statistics ───────────────────────────────────────────────────────────────
+
+/** Price summary for a set of listings, or null when there is nothing to sum. */
+export function summarize(listings) {
+	if (listings.length === 0) return null;
+
+	let total = 0;
+	let low = Infinity;
+	let high = -Infinity;
+
+	for (const { price } of listings) {
+		total += price;
+		if (price < low) low = price;
+		if (price > high) high = price;
+	}
+
+	return { average: total / listings.length, low, high, count: listings.length };
+}
+
+/**
+ * Average of the n most recent dated sales. Listings arrive newest-first, so
+ * this is the front of the list — the number a seller actually prices against.
+ */
+export function recentAverage(listings, n = 5) {
+	const prices = [];
+
+	for (const listing of listings) {
+		if (prices.length === n) break;
+		if (!listing.date || Number.isNaN(Date.parse(listing.date))) continue;
+		if (Number.isFinite(listing.price)) prices.push(listing.price);
+	}
+
+	if (prices.length === 0) return null;
+	const total = prices.reduce((sum, p) => sum + p, 0);
+	return { average: total / prices.length, count: prices.length };
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export async function parseSearchData(parsedFormData, formData, setAucListings, setBinListings, setHasResults) {
-	const queryParams = new URLSearchParams({ q: parsedFormData }).toString();
-	const res = await axios.get(`${API_BASE_URL}/api/search?${queryParams}`);
-	const binResults = res.data.bin ?? [];
-	const aucResults = res.data.auction ?? [];
-
-	setHasResults((prev) => ({
-		...prev,
-		bin: binResults.length > 0,
-		auc: aucResults.length > 0
-	}));
-
-	const maybeParse = async (arr, type, setListings) => {
-		if (arr.length === 0) return undefined;
-		return parseResults(arr, [], formData, type, setListings);
-	};
-
-	const binStats = await maybeParse(binResults, 'bin', setBinListings);
-	const aucStats = await maybeParse(aucResults, 'auc', setAucListings);
-	return { bin: binStats, auc: aucStats };
-}
-
-export async function parseScrapeData(parsedFormData, formData, setSoldAucListings, setSoldBinListings, setHasResults) {
-	const queryParams = new URLSearchParams({ q: parsedFormData }).toString();
-	const res = await axios.get(`${API_BASE_URL}/api/scrape?${queryParams}`);
-	const soldBinResults = res.data.binSold ?? [];
-	const soldAucResults = res.data.aucSold ?? [];
-
-	setHasResults((prev) => ({
-		...prev,
-		soldBin: soldBinResults.length > 0,
-		soldAuc: soldAucResults.length > 0
-	}));
-
-	const maybeParse = async (arr, type, setListings) => {
-		if (arr.length === 0) return undefined;
-		return parseResults(arr, [], formData, type, setListings);
-	};
-
-	const binSoldStats = await maybeParse(soldBinResults, 'soldBin', setSoldBinListings);
-	const aucSoldStats = await maybeParse(soldAucResults, 'soldAuc', setSoldAucListings);
-	return { binSold: binSoldStats, aucSold: aucSoldStats };
-}
-
-async function parseResults(arr1, arr2, formData, _id, stateListing) {
-	const { grade, condition, cardName, cardNumber, setName } = formData;
-
-	const normalizedCardName   = cardName?.toLowerCase().replace(/\s/g, '') || '';
-	const normalizedCardNumber = cardNumber?.toLowerCase() || '';
-	const normalizedSetName    = setName?.toLowerCase().replace(/\s/g, '') || '';
-
-	// ── Step 1: Grade / condition pre-filter ──────────────────────────────
-	let filtered;
-	if (grade) {
-		filtered = filterGraded(arr1, grade);
-	} else {
-		// Raw algorithm handles both "condition selected" and "no condition" cases
-		filtered = filterRaw(arr1, condition);
-	}
-
-	// ── Step 2: Title match on card attributes ────────────────────────────
-	filtered.forEach((result) => {
-		const title = result.title.toLowerCase().replace(/\s/g, '');
-		if (
-			title.includes(normalizedCardName) &&
-			title.includes(normalizedCardNumber) &&
-			title.includes(normalizedSetName)
-		) {
-			arr2.push(result);
-		}
+/**
+ * Fetch one source ('active' | 'sold') and return each bucket already filtered,
+ * deduplicated, sorted, and summarized:
+ *   { auc: { listings, stats }, bin: { listings, stats } }
+ */
+export async function fetchListings(source, query, formData) {
+	const { path, buckets } = SOURCES[source];
+	const { data } = await axios.get(`${API_BASE_URL}${path}`, {
+		params: { q: query }
 	});
 
-	// ── Step 3: Deduplicate ───────────────────────────────────────────────
-	const seen = new Set();
-	const dedupedArr2 = arr2.filter((result) => {
-		const id = result.itemId || result.itemWebUrl || result.link;
-		if (!id || seen.has(id)) return false;
-		seen.add(id);
-		return true;
-	});
-
-	// ── Step 4: Build listings + price stats ──────────────────────────────
-	const priceArray = [];
-	const listingsArray = [];
-
-	dedupedArr2.forEach((result) => {
-		let { value, currency } = result.price || result.currentBidPrice || {};
-		if (!value || currency !== 'USD') return;
-		value = value.replace(/[^0-9.]/g, '');
-		const num = parseFloat(value);
-		if (Number.isNaN(num)) return;
-
-		priceArray.push(num);
-		listingsArray.push({
-			id: result.itemId || '',
-			title: result.title || '',
-			url: result.itemWebUrl || result.link || '',
-			seller: result.seller?.username || '',
-			price: parseFloat(num.toFixed(2)),
-			date: result.date || ''
-		});
-	});
-
-	listingsArray.sort((a, b) =>
-		a.date && b.date ? new Date(b.date) - new Date(a.date) : 0
+	return Object.fromEntries(
+		Object.entries(buckets).map(([bucket, field]) => {
+			const listings = selectMatching(data[field] ?? [], formData);
+			return [bucket, { listings, stats: summarize(listings) }];
+		})
 	);
-
-	stateListing(listingsArray);
-
-	const avg =
-		priceArray.length > 0
-			? priceArray.reduce((a, b) => a + b, 0) / priceArray.length
-			: 0;
-
-	return {
-		Average: avg.toFixed(2),
-		Lowest:  priceArray.length > 0 ? Math.min(...priceArray).toFixed(2) : '0.00',
-		Highest: priceArray.length > 0 ? Math.max(...priceArray).toFixed(2) : '0.00',
-		'Data Points': priceArray.length
-	};
 }
